@@ -1,0 +1,44 @@
+# Runs when the internal repository pushes a version tag (v0.1.0, ...).
+# Swift Package Manager picks the tag up by itself; this publishes the Kotlin artifacts
+# to Maven Central and creates the GitHub release.
+#
+# Secrets (Settings › Secrets and variables › Actions):
+#   MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD  Central Portal user token
+#   SIGNING_KEY / SIGNING_KEY_PASSWORD               ASCII-armored GPG private key and its passphrase
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.14.3" }
+      - name: Version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Test
+        working-directory: kotlin
+        run: gradle --no-daemon :core:test
+      - name: Publish to Maven Central
+        working-directory: kotlin
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        # Uploads and validates; the release is confirmed by hand in the Central Portal
+        # (automaticRelease = false) until the process has run a few times.
+        run: gradle --no-daemon -PwithAndroid=true -PVERSION_NAME="$VERSION" publishToMavenCentral
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes

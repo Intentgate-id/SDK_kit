@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+/Package.resolved
+.gradle/
+build/
+local.properties
+.idea/
+*.iml

@@ -1,0 +1,720 @@
+openapi: 3.1.0
+info:
+  title: Intentgate basic-auth API
+  version: 0.1.0
+  description: |
+    オフライン打刻（FIDO2 / パスキー）の API です。
+
+    - **テナント API キー**（`igk_live_...` / `igk_test_...`）: 自社バックエンドから使います。アプリに埋め込まないでください。
+    - **端末トークン**（`igd_...`）: 作業員アプリが nonce の受け取りと打刻の送信にだけ使います。
+
+    テスト用キーはテスト用のデータだけを扱い、課金されません。どちらのキーかは `GET /v1/account` で確認できます。
+    エラーはすべて `{"error": {"code": "...", "message": "..."}}` の形で返ります。
+servers:
+  - url: https://checkin.intentgate.id
+    description: 本番とテストで共通（API キーでモードが決まる）
+security:
+  - apiKey: []
+tags:
+  - name: account
+  - name: workers
+    description: 作業員とパスキー
+  - name: devices
+    description: 作業員の端末
+  - name: worker-app
+    description: 作業員アプリが端末トークンで呼ぶもの
+  - name: sites
+    description: 現場、タブレットの鍵、割り当て
+  - name: events
+    description: 打刻の記録と証跡
+  - name: usage
+    description: 課金単位（作業員 × 現場 × 日）
+
+paths:
+  /v1/account:
+    get:
+      operationId: getAccount
+      tags: [account]
+      summary: キーのアカウントとモードを返す
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/workers:
+    get:
+      operationId: listWorkers
+      tags: [workers]
+      summary: 作業員の一覧（自社の作業員と、自社の現場に割り当てた他社の作業員。最大 500 件）
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: 名前・external_ref・ID で絞り込む }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workers]
+                properties:
+                  workers: { type: array, items: { $ref: "#/components/schemas/WorkerSummary" } }
+    post:
+      operationId: createWorker
+      tags: [workers]
+      summary: 作業員を作る
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name]
+              properties:
+                display_name: { type: string, example: 佐藤 一郎 }
+                external_ref: { type: string, description: 社員番号など。テナント内で一意, example: Y-0012 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  worker: { $ref: "#/components/schemas/Worker" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/workers/{id}:
+    get:
+      operationId: getWorker
+      tags: [workers]
+      summary: 作業員の詳細（パスキー、端末、割り当て）
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  worker: { $ref: "#/components/schemas/Worker" }
+                  passkeys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        credential_id: { type: string }
+                        created_at: { type: string, format: date-time }
+                        revoked_at: { type: [string, "null"], format: date-time }
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        created_at: { type: string, format: date-time }
+                        last_synced_at: { type: [string, "null"], format: date-time }
+                        revoked_at: { type: [string, "null"], format: date-time }
+                        issued_until_seq: { type: integer }
+                  assignments: { type: array, items: { $ref: "#/components/schemas/Assignment" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/workers/{id}/passkeys/options:
+    post:
+      operationId: createPasskeyOptions
+      tags: [workers]
+      summary: パスキー登録のオプションを取得する
+      description: |
+        `options` をアプリに渡し、`challenge_id` は自社バックエンドに残します。
+        チャレンジは 5 分で切れ、一度しか使えません。UV（本人確認）は必須です。
+        **呼ぶ前に作業員の本人確認を済ませてください。**
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [challenge_id, options]
+                properties:
+                  challenge_id: { type: string }
+                  options:
+                    type: object
+                    description: WebAuthn PublicKeyCredentialCreationOptionsJSON
+  /v1/workers/{id}/passkeys:
+    post:
+      operationId: registerPasskey
+      tags: [workers]
+      summary: アプリが作ったパスキーを検証して保存する
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge_id, response]
+              properties:
+                challenge_id: { type: string }
+                response: { type: object, description: WebAuthn RegistrationResponseJSON }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  passkey:
+                    type: object
+                    properties:
+                      credential_id: { type: string }
+                      worker_id: { type: string }
+        "400":
+          description: "`invalid_challenge`（不明・使用済み・期限切れ）または `invalid_registration`（RP ID・オリジン・UV の不一致など）"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/passkeys/{credentialId}:
+    delete:
+      operationId: revokePasskey
+      tags: [workers]
+      summary: パスキーを失効させる（端末の紛失など）
+      parameters:
+        - { name: credentialId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 失効しました }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/workers/{id}/devices:
+    post:
+      operationId: createDevice
+      tags: [devices]
+      summary: 作業員の端末を発行する
+      description: "`device_token` は一度だけ返ります。自社の認証済みチャネルでアプリに渡してください。"
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, device_token]
+                properties:
+                  device:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      worker_id: { type: string }
+                  device_token: { type: string, example: igd_... }
+
+  /v1/devices/{id}:
+    delete:
+      operationId: revokeDevice
+      tags: [devices]
+      summary: 端末を失効させる（機種変更、紛失）
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "204": { description: 失効しました }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/devices/{id}/missing:
+    get:
+      operationId: getMissingSequences
+      tags: [devices]
+      summary: 配った nonce のうち、まだ届いていない連番（最大 1000 件）
+      description: 前の束までに配った連番が対象です。端末が壊れた、送信を忘れているなどの手がかりになります。
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_id: { type: string }
+                  missing: { type: array, items: { type: integer } }
+
+  /v1/devices/{id}/bundle:
+    post:
+      operationId: getDeviceBundle
+      tags: [worker-app]
+      summary: nonce の束を受け取る（オンラインのとき）
+      description: 前の束の未使用分は、これ以降は配られません。先にたまった打刻を送ってから呼んでください。
+      security: [{ deviceToken: [] }]
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceBundle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: トークンが別の端末のもの
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /v1/devices/{id}/events:
+    post:
+      operationId: uploadEvents
+      tags: [worker-app]
+      summary: 署名済みの打刻を送る（1 回 500 件まで、再送しても重複しない）
+      security: [{ deviceToken: [] }]
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, records]
+              properties:
+                device_id: { type: string }
+                records:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [event, assertion]
+                    properties:
+                      event: { $ref: "#/components/schemas/CheckInEvent" }
+                      assertion: { type: object, description: WebAuthn AuthenticationResponseJSON }
+      responses:
+        "200":
+          description: 記録ごとの結果。1 件の失敗は他に影響しません。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results: { type: array, items: { $ref: "#/components/schemas/RecordResult" } }
+        "413":
+          description: "`too_many_records`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /v1/sites:
+    get:
+      operationId: listSites
+      tags: [sites]
+      summary: 現場の一覧
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sites: { type: array, items: { $ref: "#/components/schemas/SiteSummary" } }
+    post:
+      operationId: createSite
+      tags: [sites]
+      summary: 現場を作る
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, time_zone]
+              properties:
+                name: { type: string, example: 渋谷二丁目新築工事 }
+                time_zone: { type: string, description: IANA タイムゾーン。打刻の日付はこれで数える, example: Asia/Tokyo }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  site: { $ref: "#/components/schemas/Site" }
+
+  /v1/sites/{id}:
+    get:
+      operationId: getSite
+      tags: [sites]
+      summary: 現場の詳細（タブレットの鍵、割り当て）
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  site: { $ref: "#/components/schemas/Site" }
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kid: { type: string }
+                        public_key: { type: string, description: raw 32 バイト（base64url） }
+                        created_at: { type: string, format: date-time }
+                        revoked_at: { type: [string, "null"], format: date-time }
+                  assignments:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        worker_id: { type: string }
+                        display_name: { type: string }
+                        owned: { type: boolean, description: 自社の作業員か }
+                        starts_on: { type: string, format: date }
+                        ends_on: { type: [string, "null"], format: date }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/sites/{id}/keys:
+    post:
+      operationId: addSiteKey
+      tags: [sites]
+      summary: 現場タブレットの Ed25519 公開鍵を登録する
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kid, public_key]
+              properties:
+                kid: { type: string, example: tablet-1 }
+                public_key: { type: string, description: raw 32 バイト（base64url） }
+      responses:
+        "201": { description: Created }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/sites/{id}/keys/{kid}:
+    delete:
+      operationId: revokeSiteKey
+      tags: [sites]
+      summary: タブレットの鍵を失効させる（紛失、交換）
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - { name: kid, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 失効しました }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/sites/{id}/assignments:
+    post:
+      operationId: assignWorker
+      tags: [sites]
+      summary: 作業員を現場に割り当てる（他社の作業員も可。本番とテストをまたぐことはできない）
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worker_id, starts_on]
+              properties:
+                worker_id: { type: string }
+                starts_on: { type: string, format: date }
+                ends_on: { type: string, format: date }
+      responses:
+        "201": { description: Created（同じ組み合わせは期間を上書き） }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/sites/{id}/assignments/{workerId}:
+    delete:
+      operationId: unassignWorker
+      tags: [sites]
+      summary: 割り当てを外す
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - { name: workerId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 外しました }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/events:
+    get:
+      operationId: listEvents
+      tags: [events]
+      summary: 打刻の記録（最大 5000 件、超えたら truncated）
+      parameters:
+        - { $ref: "#/components/parameters/from" }
+        - { $ref: "#/components/parameters/to" }
+        - { name: site_id, in: query, schema: { type: string } }
+        - { name: worker_id, in: query, schema: { type: string } }
+        - { name: flagged, in: query, schema: { type: string, enum: ["true"] }, description: 要確認のものだけ }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  truncated: { type: boolean }
+                  events: { type: array, items: { $ref: "#/components/schemas/CheckInRow" } }
+
+  /v1/events.csv:
+    get:
+      operationId: exportEventsCsv
+      tags: [events]
+      summary: 打刻の記録の CSV（UTF-8 BOM 付き、Excel でそのまま開ける）
+      parameters:
+        - { $ref: "#/components/parameters/from" }
+        - { $ref: "#/components/parameters/to" }
+        - { name: site_id, in: query, schema: { type: string } }
+        - { name: worker_id, in: query, schema: { type: string } }
+        - { name: flagged, in: query, schema: { type: string, enum: ["true"] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            text/csv: { schema: { type: string } }
+
+  /v1/events/{deviceId}/{seq}:
+    get:
+      operationId: getEventEvidence
+      tags: [events]
+      summary: 1 件の打刻の署名済み証跡（監査用）
+      parameters:
+        - { name: deviceId, in: path, required: true, schema: { type: string } }
+        - { name: seq, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: アップロードされた記録（event と assertion）そのもの
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  record: { type: object }
+                  flags: { type: array, items: { $ref: "#/components/schemas/Flag" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/usage:
+    get:
+      operationId: getUsage
+      tags: [usage]
+      summary: 課金単位（作業員 × 現場 × 日）の明細
+      parameters:
+        - { $ref: "#/components/parameters/from" }
+        - { $ref: "#/components/parameters/to" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  from: { type: string, format: date }
+                  to: { type: string, format: date }
+                  mode: { $ref: "#/components/schemas/Mode" }
+                  billable_units: { type: integer, description: 課金単位の数（テストモードでは請求されない） }
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        site_id: { type: string }
+                        site_name: { type: string }
+                        worker_id: { type: string }
+                        worker_name: { type: string }
+                        date: { type: string, format: date }
+                        events: { type: integer, description: その日その現場での打刻数 }
+
+  /v1/usage.csv:
+    get:
+      operationId: exportUsageCsv
+      tags: [usage]
+      summary: 課金単位の CSV
+      parameters:
+        - { $ref: "#/components/parameters/from" }
+        - { $ref: "#/components/parameters/to" }
+      responses:
+        "200":
+          description: OK
+          content:
+            text/csv: { schema: { type: string } }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: テナント API キー（igk_live_... / igk_test_...）
+    deviceToken:
+      type: http
+      scheme: bearer
+      description: 端末トークン（igd_...）
+
+  parameters:
+    id: { name: id, in: path, required: true, schema: { type: string } }
+    from: { name: from, in: query, required: true, schema: { type: string, format: date }, description: 現場の現地日付（YYYY-MM-DD） }
+    to: { name: to, in: query, required: true, schema: { type: string, format: date } }
+
+  responses:
+    Unauthorized:
+      description: キーがない、無効、失効済み、またはテナントが停止中
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: 見つからない（他のテナントや別のモードのものも 404）
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Conflict:
+      description: すでに登録されている
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, examples: [unauthorized, forbidden, not_found, conflict, invalid_request, invalid_challenge, invalid_registration, too_many_records] }
+            message: { type: string }
+
+    Mode: { type: string, enum: [live, test] }
+
+    Account:
+      type: object
+      properties:
+        account_id: { type: string, description: 契約単位の ID（本番のテナント ID） }
+        tenant_id: { type: string, description: このキーのテナント。テストでは別の ID }
+        name: { type: string }
+        mode: { $ref: "#/components/schemas/Mode" }
+        livemode: { type: boolean }
+        rp_id: { type: string, description: パスキーの RP ID }
+        origins: { type: array, items: { type: string }, description: 受け付けるオリジン（https://... または android:apk-key-hash:...） }
+
+    Worker:
+      type: object
+      properties:
+        id: { type: string, example: wrk_... }
+        display_name: { type: string }
+        external_ref: { type: [string, "null"] }
+        owned: { type: boolean }
+    WorkerSummary:
+      allOf:
+        - { $ref: "#/components/schemas/Worker" }
+        - type: object
+          properties:
+            created_at: { type: string, format: date-time }
+            passkeys: { type: integer }
+            devices: { type: integer }
+            last_checkin: { type: [integer, "null"], description: 最後の打刻の QR 時刻（unix 秒） }
+
+    Site:
+      type: object
+      properties:
+        id: { type: string, example: site_... }
+        name: { type: string }
+        time_zone: { type: string }
+    SiteSummary:
+      allOf:
+        - { $ref: "#/components/schemas/Site" }
+        - type: object
+          properties:
+            created_at: { type: string, format: date-time }
+            assigned_workers: { type: integer, description: 今日割り当てのある人数 }
+            active_keys: { type: integer }
+            last_checkin: { type: [integer, "null"] }
+
+    Assignment:
+      type: object
+      properties:
+        site_id: { type: string }
+        site_name: { type: string }
+        starts_on: { type: string, format: date }
+        ends_on: { type: [string, "null"], format: date }
+
+    DeviceBundle:
+      type: object
+      required: [device_id, nonce_kid, nonces, event_types, lock_after]
+      properties:
+        device_id: { type: string }
+        nonce_kid: { type: string }
+        nonces:
+          type: array
+          items:
+            type: object
+            properties:
+              seq: { type: integer }
+              nonce: { type: string, description: 32 バイト（base64url） }
+        event_types:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, example: site_entry }
+              billable: { type: boolean }
+        lock_after: { type: string, format: date-time, description: これを過ぎたら同期するまで打刻できない }
+
+    CheckInEvent:
+      type: object
+      description: SDK が作ります。正規化（JCS）した内容と nonce からチャレンジを計算します（spec/PROTOCOL.md）。
+      required: [v, type, device_id, seq, nonce_kid, site_token, occurred_at]
+      properties:
+        v: { const: 1 }
+        type: { type: string, example: site_entry }
+        device_id: { type: string }
+        seq: { type: integer }
+        nonce_kid: { type: string }
+        site_token: { type: string, example: IGS1.xxx.yyy }
+        occurred_at: { type: string, description: 端末の時刻（RFC 3339、秒まで）, example: "2026-11-09T07:58:12+09:00" }
+        attributes: { type: object, description: 自由な追加情報（署名の対象。Intentgate は値を検証しない） }
+
+    RecordResult:
+      type: object
+      required: [seq, status, flags]
+      properties:
+        seq: { type: [integer, "null"] }
+        status: { type: string, enum: [accepted, duplicate, rejected] }
+        reason: { $ref: "#/components/schemas/RejectReason" }
+        flags: { type: array, items: { $ref: "#/components/schemas/Flag" } }
+
+    RejectReason:
+      type: string
+      enum:
+        - malformed_event
+        - device_mismatch
+        - unknown_event_type
+        - unknown_device
+        - seq_not_issued
+        - unknown_credential
+        - credential_device_mismatch
+        - unknown_nonce_kid
+        - invalid_signature
+        - invalid_site_token
+        - unknown_site
+
+    Flag:
+      type: string
+      enum: [clock_skew, unassigned_site]
+      description: "clock_skew: 端末と QR の時刻が 5 分以上ずれている。unassigned_site: その日に割り当てのない現場"
+
+    CheckInRow:
+      type: object
+      properties:
+        device_id: { type: string }
+        seq: { type: integer }
+        type: { type: string }
+        billable: { type: boolean }
+        site_time: { type: integer, description: QR の時刻（unix 秒） }
+        local_date: { type: string, format: date }
+        occurred_at: { type: string }
+        flags: { type: array, items: { $ref: "#/components/schemas/Flag" } }
+        received_at: { type: string, format: date-time }
+        site_id: { type: string }
+        site_name: { type: string }
+        time_zone: { type: string }
+        worker_id: { type: string }
+        worker_name: { type: string }
+        credential_id: { type: string }
