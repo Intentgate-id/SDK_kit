@@ -5,10 +5,9 @@ Intentgate の打刻 SDK を使って、作業員アプリと自社のバック�
 | 資料 | 内容 |
 | --- | --- |
 | [クイックスタート](quickstart.md) | テスト用キーを受け取ってから、最初の打刻が管理画面に表示されるまで |
-| [仕組み](concepts.md) | 登場する 4 者（自社バックエンド、作業員アプリ、現場タブレット、Intentgate）と、オフライン打刻で何が証明できるか |
-| [Android への組み込み](integration-android.md) | Credential Manager でのパスキー登録と打刻、Digital Asset Links |
-| [iOS への組み込み](integration-ios.md) | AuthenticationServices でのパスキー登録と打刻、Associated Domains |
-| [現場タブレット](site-tablet.md) | 署名付き QR を表示するタブレットの作り方と鍵の管理 |
+| [仕組み](concepts.md) | 登場する 3 者（自社バックエンド、作業員アプリ、Intentgate）、打刻の流れ、何が証明できるか、要確認のフラグ |
+| [Android への組み込み](integration-android.md) | 位置の取得、Credential Manager でのパスキー登録と打刻、Digital Asset Links |
+| [iOS への組み込み](integration-ios.md) | Core Location での位置の取得、AuthenticationServices でのパスキー登録と打刻、Associated Domains |
 | [API リファレンス](openapi.yaml) | OpenAPI 3.1。`/v1` のすべてのエンドポイント、エラーコード |
 
 プロトコルの仕様は [spec/PROTOCOL.md](../spec/PROTOCOL.md)、言語間で共通のテストベクタは [spec/test-vectors.json](../spec/test-vectors.json) にあります。

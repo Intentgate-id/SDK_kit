@@ -31,7 +31,7 @@ curl -s $IG_API/v1/account -H "Authorization: Bearer $IG_KEY"
 
 ## 2. スマホなしで一周させる（シミュレーター）
 
-SDK の公開リポジトリにある `tools/simulate.mjs` は、現場タブレットと作業員アプリの役をソフトウェアで演じます。現場を作り、作業員のパスキーを登録し、端末を発行して打刻を 1 件送ります。テスト用キーでしか動きません。
+SDK の公開リポジトリにある `tools/simulate.mjs` は、作業員アプリの役をソフトウェアで演じます。現場（東京駅、半径 100 m）を作り、作業員のパスキーを登録し、端末を発行して、現場の中と 1 km 離れた場所から 1 件ずつ打刻します。テスト用キーでしか動きません。
 
 ```sh
 git clone https://github.com/Intentgate-id/SDK_kit && cd SDK_kit
@@ -40,15 +40,16 @@ IG_API=$IG_API IG_KEY=$IG_KEY node tools/simulate.mjs     # Node.js 20 以上。
 
 ```
 ✓ account 山田建設株式会社 (test mode), RP ID staging.example.co.jp
-✓ site site_... with tablet key sim-tablet
+✓ site site_..., radius 100 m
 ✓ worker wrk_... with a passkey, assigned to the site
-✓ device dev_..., 50 nonces until 2026-11-16T07:05:18.710Z
-✓ check-in accepted (seq 0)
-✓ re-sending the same record is safe: duplicate
+✓ device dev_...
+✓ check-in 20 m from the centre: accepted, 20 m from the centre, flags []
+✓ re-sending the same completion is safe: duplicate
+✓ check-in 1 km away (recorded with a flag): accepted, 999 m from the centre, flags [outside_site]
 ✓ usage today: 1 unit(s) in test mode (not billed)
 ```
 
-管理画面にログインし、左上の「テストモード」をオンにして「入退記録」を開くと、この打刻が表示されます。
+管理画面にログインし、左上の「テストモード」をオンにして「入退記録」を開くと、この打刻が表示されます。1 km 離れた打刻は「現場外」として要確認になっています。
 
 ## 3. 自社のバックエンドに組み込む
 
@@ -56,13 +57,15 @@ IG_API=$IG_API IG_KEY=$IG_KEY node tools/simulate.mjs     # Node.js 20 以上。
 
 ### 現場を作る
 
+現場の中心の緯度・経度と半径（メートル）が必要です。地図アプリで現場を長押しすると座標が出ます。
+
 ```sh
 curl -s -X POST $IG_API/v1/sites -H "Authorization: Bearer $IG_KEY" -H "Content-Type: application/json" \
-  -d '{"name": "渋谷二丁目新築工事", "time_zone": "Asia/Tokyo"}'
-# → {"site": {"id": "site_...", "name": "渋谷二丁目新築工事", "time_zone": "Asia/Tokyo"}}
+  -d '{"name": "渋谷二丁目新築工事", "time_zone": "Asia/Tokyo", "latitude": 35.659518, "longitude": 139.70357, "radius_m": 80}'
+# → {"site": {"id": "site_...", "name": "渋谷二丁目新築工事", "time_zone": "Asia/Tokyo", "latitude": 35.659518, "longitude": 139.70357, "radius_m": 80, ...}}
 ```
 
-現場タブレットの公開鍵の登録は [現場タブレット](site-tablet.md) を見てください。
+位置は後から `PATCH /v1/sites/{id}`（`latitude`、`longitude`、`radius_m` の 3 つをまとめて）か、管理画面の現場の詳細で変えられます。
 
 ### 作業員を登録する
 
@@ -110,12 +113,12 @@ curl -s -X POST $IG_API/v1/sites/site_.../assignments -H "Authorization: Bearer 
 - [Android](integration-android.md)
 - [iOS](integration-ios.md)
 
-アプリが Intentgate と直接やり取りするのは次の 2 つだけで、どちらも端末トークンで認証します。
+アプリが Intentgate と直接やり取りするのは打刻の 2 回だけで、どちらも端末トークンで認証します。SDK の `CheckInClient` が呼びます。
 
 | | いつ |
 | --- | --- |
-| `POST /v1/devices/{id}/bundle` | オンラインのとき。nonce の束を受け取る（オフラインで打刻できる回数と期限） |
-| `POST /v1/devices/{id}/events` | オンラインに戻ったとき。たまった打刻を送る |
+| `POST /v1/devices/{id}/checkins` | 打刻ボタンを押したとき。種別・現場・位置を送り、サーバーが確定したイベントとチャレンジを受け取る |
+| `POST /v1/devices/{id}/checkins/{checkin_id}/complete` | パスキーで署名した後。署名を送り、結果（フラグ、現場からの距離）を受け取る |
 
 ## 5. 利用量を取る
 

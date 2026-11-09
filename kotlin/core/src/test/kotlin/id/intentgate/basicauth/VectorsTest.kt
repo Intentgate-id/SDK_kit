@@ -19,24 +19,12 @@ class VectorsTest {
     }
 
     @Test
-    fun siteTokenMatchesReference() {
-        val v = vectors["site_token"] as Map<*, *>
-        val p = v["payload"] as Map<*, *>
-        val token = SiteToken(p["site_id"] as String, p["kid"] as String, p["t"] as Long)
-            .encode(SiteToken.jdkSigner(hexToBytes(v["seed_hex"] as String)))
-        assertEquals(v["token"], token)
-        assertEquals(token, v["token"])
-        val verified = SiteToken.verify(token, hexToBytes(v["public_key_hex"] as String))
-        assertEquals("site_123", verified.siteId)
-    }
-
-    @Test
     fun challengeMatchesReference() {
         val v = vectors["challenge"] as Map<*, *>
         @Suppress("UNCHECKED_CAST")
         val event = CheckInEvent.fromJsonMap(v["event"] as Map<String, Any?>)
         assertEquals(v["event_canonical"], event.canonicalJson())
-        assertEquals(v["challenge_b64url"], Challenge.computeBase64Url(hexToBytes(v["nonce_hex"] as String), event))
+        assertEquals(v["challenge_b64url"], Challenge.computeBase64Url(event))
     }
 
     @Test

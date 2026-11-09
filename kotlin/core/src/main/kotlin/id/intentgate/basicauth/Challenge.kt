@@ -1,16 +1,16 @@
 package id.intentgate.basicauth
 
 /**
- * challenge = SHA-256( "intentgate-basic-auth/v1" || 0x00 || nonce || JCS(event) )
+ * challenge = SHA-256( "intentgate-basic-auth/v2" || 0x00 || JCS(event) )
+ *
+ * The passkey signs clientDataJSON, which carries this challenge, so the signature
+ * covers the type, site, device, position, server time and server nonce.
  */
 object Challenge {
-    const val DOMAIN = "intentgate-basic-auth/v1"
-    const val NONCE_LENGTH = 32
+    const val DOMAIN = "intentgate-basic-auth/v2"
 
-    fun compute(nonce: ByteArray, event: CheckInEvent): ByteArray {
-        require(nonce.size == NONCE_LENGTH) { "nonce must be $NONCE_LENGTH bytes" }
-        return sha256(DOMAIN.toByteArray(Charsets.UTF_8), byteArrayOf(0), nonce, event.canonicalJson().toByteArray(Charsets.UTF_8))
-    }
+    fun compute(event: CheckInEvent): ByteArray =
+        sha256(DOMAIN.toByteArray(Charsets.UTF_8), byteArrayOf(0), event.canonicalJson().toByteArray(Charsets.UTF_8))
 
-    fun computeBase64Url(nonce: ByteArray, event: CheckInEvent): String = Base64Url.encode(compute(nonce, event))
+    fun computeBase64Url(event: CheckInEvent): String = Base64Url.encode(compute(event))
 }

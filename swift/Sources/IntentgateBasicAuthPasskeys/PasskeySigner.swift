@@ -125,21 +125,18 @@ extension PasskeySigner: ASAuthorizationControllerDelegate, ASAuthorizationContr
 
 @available(iOS 16.0, macOS 13.0, *)
 extension CheckInClient {
-    /// prepare → passkey (Face ID / Touch ID) → queue. Returns the nonce if the user cancels.
+    /// Full check-in: ask the server (with the position), check the issued event, Face ID /
+    /// Touch ID, complete. `confirm` runs between the server's answer and the prompt, e.g. to
+    /// show the worker the site and time; return false to stop (returns nil).
     /// Call from the main thread.
-    @discardableResult
     public func checkIn(
-        signer: PasskeySigner, type: String, siteToken: String,
-        attributes: [String: JSONValue] = [:], allowedCredentialIds: [Data] = []
-    ) async throws -> UploadRecord {
-        let prepared = try prepare(type: type, siteToken: siteToken, attributes: attributes)
-        do {
-            let assertion = try await signer.sign(challenge: prepared.challengeData, allowedCredentialIds: allowedCredentialIds)
-            return try complete(prepared, assertionJSON: assertion)
-        } catch {
-            cancel(prepared)
-            throw error
-        }
+        signer: PasskeySigner, request: CheckInRequest,
+        confirm: (IssuedCheckIn) async -> Bool = { _ in true }
+    ) async throws -> CheckInResult? {
+        let issued = try await start(request)
+        guard await confirm(issued) else { return nil }
+        let assertion = try await signer.sign(challenge: issued.challengeData, allowedCredentialIds: issued.allowCredentialIds)
+        return try await complete(checkinId: issued.checkinId, assertionJSON: assertion)
     }
 }
 #endif

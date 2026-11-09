@@ -1,12 +1,12 @@
 openapi: 3.1.0
 info:
   title: Intentgate basic-auth API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    オフライン打刻（FIDO2 / パスキー）の API です。
+    パスキー（FIDO2）で承認する打刻の API です。作業員アプリはオンラインで使います（spec/PROTOCOL.md）。
 
     - **テナント API キー**（`igk_live_...` / `igk_test_...`）: 自社バックエンドから使います。アプリに埋め込まないでください。
-    - **端末トークン**（`igd_...`）: 作業員アプリが nonce の受け取りと打刻の送信にだけ使います。
+    - **端末トークン**（`igd_...`）: 作業員アプリが打刻の申請と完了にだけ使います。
 
     テスト用キーはテスト用のデータだけを扱い、課金されません。どちらのキーかは `GET /v1/account` で確認できます。
     エラーはすべて `{"error": {"code": "...", "message": "..."}}` の形で返ります。
@@ -24,7 +24,7 @@ tags:
   - name: worker-app
     description: 作業員アプリが端末トークンで呼ぶもの
   - name: sites
-    description: 現場、タブレットの鍵、割り当て
+    description: 現場（位置と半径）と割り当て
   - name: events
     description: 打刻の記録と証跡
   - name: usage
@@ -116,9 +116,8 @@ paths:
                       properties:
                         id: { type: string }
                         created_at: { type: string, format: date-time }
-                        last_synced_at: { type: [string, "null"], format: date-time }
+                        last_seen_at: { type: [string, "null"], format: date-time }
                         revoked_at: { type: [string, "null"], format: date-time }
-                        issued_until_seq: { type: integer }
                   assignments: { type: array, items: { $ref: "#/components/schemas/Assignment" } }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -223,79 +222,72 @@ paths:
         "204": { description: 失効しました }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /v1/devices/{id}/missing:
-    get:
-      operationId: getMissingSequences
-      tags: [devices]
-      summary: 配った nonce のうち、まだ届いていない連番（最大 1000 件）
-      description: 前の束までに配った連番が対象です。端末が壊れた、送信を忘れているなどの手がかりになります。
-      parameters: [{ $ref: "#/components/parameters/id" }]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  device_id: { type: string }
-                  missing: { type: array, items: { type: integer } }
-
-  /v1/devices/{id}/bundle:
+  /v1/devices/{id}/checkins:
     post:
-      operationId: getDeviceBundle
+      operationId: startCheckIn
       tags: [worker-app]
-      summary: nonce の束を受け取る（オンラインのとき）
-      description: 前の束の未使用分は、これ以降は配られません。先にたまった打刻を送ってから呼んでください。
-      security: [{ deviceToken: [] }]
-      parameters: [{ $ref: "#/components/parameters/id" }]
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/DeviceBundle" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403":
-          description: トークンが別の端末のもの
-          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
-
-  /v1/devices/{id}/events:
-    post:
-      operationId: uploadEvents
-      tags: [worker-app]
-      summary: 署名済みの打刻を送る（1 回 500 件まで、再送しても重複しない）
+      summary: 打刻を申請する（サーバーがイベントを確定し、チャレンジを発行する）
+      description: |
+        応答の `event` が申請どおりかを SDK で確かめてから（`checkIssuedCheckIn`）、`challenge` をパスキーで署名し、
+        期限（既定 180 秒）内に complete を呼んでください。位置が現場から外れていても拒否はせず、記録にフラグが付きます。
       security: [{ deviceToken: [] }]
       parameters: [{ $ref: "#/components/parameters/id" }]
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [device_id, records]
-              properties:
-                device_id: { type: string }
-                records:
-                  type: array
-                  maxItems: 500
-                  items:
-                    type: object
-                    required: [event, assertion]
-                    properties:
-                      event: { $ref: "#/components/schemas/CheckInEvent" }
-                      assertion: { type: object, description: WebAuthn AuthenticationResponseJSON }
+            schema: { $ref: "#/components/schemas/CheckInRequest" }
       responses:
-        "200":
-          description: 記録ごとの結果。1 件の失敗は他に影響しません。
+        "201":
+          description: 発行しました
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  results: { type: array, items: { $ref: "#/components/schemas/RecordResult" } }
-        "413":
-          description: "`too_many_records`"
+              schema: { $ref: "#/components/schemas/IssuedCheckIn" }
+        "400":
+          description: "`malformed_request`、`unknown_event_type`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: トークンが別の端末のもの
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: "`site_location_missing`（現場の位置が未設定）、`no_passkey`（作業員にパスキーがない）"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /v1/devices/{id}/checkins/{checkinId}/complete:
+    post:
+      operationId: completeCheckIn
+      tags: [worker-app]
+      summary: パスキーの署名を渡して打刻を確定する（再送しても重複しない）
+      security: [{ deviceToken: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - { name: checkinId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assertion]
+              properties:
+                assertion: { type: object, description: WebAuthn AuthenticationResponseJSON }
+      responses:
+        "200":
+          description: 記録しました。同じ打刻の 2 回目以降は `duplicate` で同じ結果を返します。
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckInResult" }
+        "400":
+          description: "`invalid_signature`、`unknown_credential`、`credential_device_mismatch`、`malformed_request`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: "`unknown_checkin`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "410":
+          description: "`checkin_expired`: 期限切れ。申請からやり直してください"
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   /v1/sites:
@@ -322,10 +314,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, time_zone]
+              required: [name, time_zone, latitude, longitude, radius_m]
               properties:
                 name: { type: string, example: 渋谷二丁目新築工事 }
                 time_zone: { type: string, description: IANA タイムゾーン。打刻の日付はこれで数える, example: Asia/Tokyo }
+                latitude: { type: number, minimum: -90, maximum: 90, example: 35.658 }
+                longitude: { type: number, minimum: -180, maximum: 180, example: 139.7016 }
+                radius_m: { type: integer, minimum: 10, maximum: 5000, description: 現場とみなす半径（メートル）, example: 150 }
       responses:
         "201":
           description: Created
@@ -340,7 +335,7 @@ paths:
     get:
       operationId: getSite
       tags: [sites]
-      summary: 現場の詳細（タブレットの鍵、割り当て）
+      summary: 現場の詳細（割り当て）
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200":
@@ -351,15 +346,6 @@ paths:
                 type: object
                 properties:
                   site: { $ref: "#/components/schemas/Site" }
-                  keys:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        kid: { type: string }
-                        public_key: { type: string, description: raw 32 バイト（base64url） }
-                        created_at: { type: string, format: date-time }
-                        revoked_at: { type: [string, "null"], format: date-time }
                   assignments:
                     type: array
                     items:
@@ -371,12 +357,10 @@ paths:
                         starts_on: { type: string, format: date }
                         ends_on: { type: [string, "null"], format: date }
         "404": { $ref: "#/components/responses/NotFound" }
-
-  /v1/sites/{id}/keys:
-    post:
-      operationId: addSiteKey
+    patch:
+      operationId: updateSite
       tags: [sites]
-      summary: 現場タブレットの Ed25519 公開鍵を登録する
+      summary: 現場の名前、タイムゾーン、位置と半径を変える（位置は 3 つまとめて）
       parameters: [{ $ref: "#/components/parameters/id" }]
       requestBody:
         required: true
@@ -384,24 +368,21 @@ paths:
           application/json:
             schema:
               type: object
-              required: [kid, public_key]
               properties:
-                kid: { type: string, example: tablet-1 }
-                public_key: { type: string, description: raw 32 バイト（base64url） }
+                name: { type: string }
+                time_zone: { type: string }
+                latitude: { type: number }
+                longitude: { type: number }
+                radius_m: { type: integer, minimum: 10, maximum: 5000 }
       responses:
-        "201": { description: Created }
-        "409": { $ref: "#/components/responses/Conflict" }
-
-  /v1/sites/{id}/keys/{kid}:
-    delete:
-      operationId: revokeSiteKey
-      tags: [sites]
-      summary: タブレットの鍵を失効させる（紛失、交換）
-      parameters:
-        - { $ref: "#/components/parameters/id" }
-        - { name: kid, in: path, required: true, schema: { type: string } }
-      responses:
-        "204": { description: 失効しました }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  site: { $ref: "#/components/schemas/Site" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/sites/{id}/assignments:
@@ -476,24 +457,29 @@ paths:
           content:
             text/csv: { schema: { type: string } }
 
-  /v1/events/{deviceId}/{seq}:
+  /v1/events/{checkinId}:
     get:
       operationId: getEventEvidence
       tags: [events]
       summary: 1 件の打刻の署名済み証跡（監査用）
       parameters:
-        - { name: deviceId, in: path, required: true, schema: { type: string } }
-        - { name: seq, in: path, required: true, schema: { type: integer } }
+        - { name: checkinId, in: path, required: true, schema: { type: string } }
       responses:
         "200":
-          description: アップロードされた記録（event と assertion）そのもの
+          description: 署名された記録（event と assertion）そのもの。パスキーの公開鍵で誰でも検証できます
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  record: { type: object }
+                  record:
+                    type: object
+                    properties:
+                      event: { $ref: "#/components/schemas/CheckInEvent" }
+                      assertion: { type: object, description: WebAuthn AuthenticationResponseJSON }
                   flags: { type: array, items: { $ref: "#/components/schemas/Flag" } }
+                  distance_m: { type: integer }
+                  credential_id: { type: string }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/usage:
@@ -578,7 +564,7 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string, examples: [unauthorized, forbidden, not_found, conflict, invalid_request, invalid_challenge, invalid_registration, too_many_records] }
+            code: { type: string, examples: [unauthorized, forbidden, not_found, conflict, invalid_request, invalid_challenge, invalid_registration, invalid_signature, checkin_expired] }
             message: { type: string }
 
     Mode: { type: string, enum: [live, test] }
@@ -609,7 +595,7 @@ components:
             created_at: { type: string, format: date-time }
             passkeys: { type: integer }
             devices: { type: integer }
-            last_checkin: { type: [integer, "null"], description: 最後の打刻の QR 時刻（unix 秒） }
+            last_checkin: { type: [integer, "null"], description: 最後の打刻の時刻（unix 秒） }
 
     Site:
       type: object
@@ -617,6 +603,9 @@ components:
         id: { type: string, example: site_... }
         name: { type: string }
         time_zone: { type: string }
+        latitude: { type: [number, "null"], description: 現場の中心（未設定なら null。打刻できない） }
+        longitude: { type: [number, "null"] }
+        radius_m: { type: [integer, "null"] }
     SiteSummary:
       allOf:
         - { $ref: "#/components/schemas/Site" }
@@ -624,7 +613,6 @@ components:
           properties:
             created_at: { type: string, format: date-time }
             assigned_workers: { type: integer, description: 今日割り当てのある人数 }
-            active_keys: { type: integer }
             last_checkin: { type: [integer, "null"] }
 
     Assignment:
@@ -635,81 +623,98 @@ components:
         starts_on: { type: string, format: date }
         ends_on: { type: [string, "null"], format: date }
 
-    DeviceBundle:
+    CheckInRequest:
       type: object
-      required: [device_id, nonce_kid, nonces, event_types, lock_after]
+      required: [type, site_id, location]
       properties:
-        device_id: { type: string }
-        nonce_kid: { type: string }
-        nonces:
-          type: array
-          items:
-            type: object
-            properties:
-              seq: { type: integer }
-              nonce: { type: string, description: 32 バイト（base64url） }
-        event_types:
-          type: array
-          items:
-            type: object
-            properties:
-              type: { type: string, example: site_entry }
-              billable: { type: boolean }
-        lock_after: { type: string, format: date-time, description: これを過ぎたら同期するまで打刻できない }
+        type: { type: string, example: site_entry }
+        site_id: { type: string }
+        location:
+          type: object
+          required: [latitude, longitude, accuracy_m]
+          properties:
+            latitude: { type: number, example: 35.681236 }
+            longitude: { type: number, example: 139.76712 }
+            accuracy_m: { type: number, description: 端末が報告した水平精度（メートル）, example: 11.4 }
+        attributes: { type: object, description: 自由な追加情報（署名の対象。Intentgate は値を検証しない） }
+
+    IssuedCheckIn:
+      type: object
+      required: [checkin_id, event, challenge, expires_at, rp_id, allow_credentials]
+      properties:
+        checkin_id: { type: string, example: chk_... }
+        event: { $ref: "#/components/schemas/CheckInEvent" }
+        challenge: { type: string, description: "SHA-256(\"intentgate-basic-auth/v2\" || 0x00 || JCS(event))（base64url）" }
+        expires_at: { type: string, format: date-time }
+        rp_id: { type: string }
+        allow_credentials: { type: array, items: { type: string }, description: 作業員のパスキーの credential id }
 
     CheckInEvent:
       type: object
-      description: SDK が作ります。正規化（JCS）した内容と nonce からチャレンジを計算します（spec/PROTOCOL.md）。
-      required: [v, type, device_id, seq, nonce_kid, site_token, occurred_at]
+      description: サーバーが確定し、作業員のパスキーが署名するイベント（spec/PROTOCOL.md）。
+      required: [v, type, checkin_id, device_id, site_id, nonce, issued_at, location, attributes]
       properties:
-        v: { const: 1 }
+        v: { const: 2 }
         type: { type: string, example: site_entry }
+        checkin_id: { type: string }
         device_id: { type: string }
-        seq: { type: integer }
-        nonce_kid: { type: string }
-        site_token: { type: string, example: IGS1.xxx.yyy }
-        occurred_at: { type: string, description: 端末の時刻（RFC 3339、秒まで）, example: "2026-11-09T07:58:12+09:00" }
-        attributes: { type: object, description: 自由な追加情報（署名の対象。Intentgate は値を検証しない） }
+        site_id: { type: string }
+        nonce: { type: string, description: サーバーの乱数 32 バイト（base64url） }
+        issued_at: { type: string, description: サーバーの時刻（UTC）, example: "2026-11-08T22:58:12.000Z" }
+        location:
+          type: object
+          required: [lat_e7, lng_e7, accuracy_m]
+          properties:
+            lat_e7: { type: integer, description: 緯度 × 10^7 }
+            lng_e7: { type: integer, description: 経度 × 10^7 }
+            accuracy_m: { type: integer }
+        attributes: { type: object }
 
-    RecordResult:
+    CheckInResult:
       type: object
-      required: [seq, status, flags]
+      required: [checkin_id, status, flags, billable, distance_m]
       properties:
-        seq: { type: [integer, "null"] }
-        status: { type: string, enum: [accepted, duplicate, rejected] }
-        reason: { $ref: "#/components/schemas/RejectReason" }
+        checkin_id: { type: string }
+        status: { type: string, enum: [accepted, duplicate] }
         flags: { type: array, items: { $ref: "#/components/schemas/Flag" } }
+        billable: { type: boolean }
+        distance_m: { type: integer, description: 現場の中心からの距離（メートル） }
 
-    RejectReason:
+    CheckInErrorCode:
       type: string
+      description: 打刻の申請と完了で返るエラーコード
       enum:
-        - malformed_event
-        - device_mismatch
+        - malformed_request
         - unknown_event_type
         - unknown_device
-        - seq_not_issued
+        - unknown_site
+        - site_location_missing
+        - no_passkey
+        - unknown_checkin
+        - checkin_expired
         - unknown_credential
         - credential_device_mismatch
-        - unknown_nonce_kid
         - invalid_signature
-        - invalid_site_token
-        - unknown_site
 
     Flag:
       type: string
-      enum: [clock_skew, unassigned_site]
-      description: "clock_skew: 端末と QR の時刻が 5 分以上ずれている。unassigned_site: その日に割り当てのない現場"
+      enum: [outside_site, low_accuracy, unassigned_site]
+      description: "outside_site: 現場の半径 + 精度より遠い。low_accuracy: 精度が 100 m より悪い。unassigned_site: その日に割り当てのない現場"
 
     CheckInRow:
       type: object
       properties:
+        checkin_id: { type: string }
         device_id: { type: string }
-        seq: { type: integer }
         type: { type: string }
         billable: { type: boolean }
-        site_time: { type: integer, description: QR の時刻（unix 秒） }
+        site_time: { type: integer, description: 打刻の時刻（サーバー、unix 秒） }
         local_date: { type: string, format: date }
-        occurred_at: { type: string }
+        issued_at: { type: string }
+        latitude_e7: { type: integer }
+        longitude_e7: { type: integer }
+        accuracy_m: { type: integer }
+        distance_m: { type: integer, description: 現場の中心からの距離（メートル） }
         flags: { type: array, items: { $ref: "#/components/schemas/Flag" } }
         received_at: { type: string, format: date-time }
         site_id: { type: string }

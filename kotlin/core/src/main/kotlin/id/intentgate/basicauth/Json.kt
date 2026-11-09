@@ -1,7 +1,7 @@
 package id.intentgate.basicauth
 
 /**
- * Minimal JSON reader for server bundles, site tokens and assertion JSON.
+ * Minimal JSON reader for server answers and assertion JSON.
  * Integers become Long, other numbers Double, objects LinkedHashMap.
  */
 internal object Json {

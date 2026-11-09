@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "jcs": [
     {
       "input": {
@@ -57,62 +57,35 @@
       "canonical": "{\"nested\":{\"x\":{\"b\":[1,{\"c\":2,\"d\":1}]},\"y\":[],\"z\":{}}}"
     }
   ],
-  "nonce": [
-    {
-      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-      "device_id": "dev_1",
-      "seq": 0,
-      "nonce_b64url": "XE3qfHT2spo9W2cV6hT6JTvhJn1nz_DKJLIEe2fz_L8"
-    },
-    {
-      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-      "device_id": "dev_1",
-      "seq": 1,
-      "nonce_b64url": "yiKJF4y79JJ8DPgHPQwDuVqFGJKl4YtqNKXuC9I9T6E"
-    },
-    {
-      "secret_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-      "device_id": "dev_42",
-      "seq": 1834,
-      "nonce_b64url": "VlKOvrEJ-kYcihTtUXGaQvFwqYlIMeyrKmlM5eFxDWA"
-    }
-  ],
-  "site_token": {
-    "seed_hex": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
-    "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
-    "payload": {
-      "v": 1,
-      "site_id": "site_123",
-      "kid": "k1",
-      "t": 1762642680
-    },
-    "token": "IGS1.eyJraWQiOiJrMSIsInNpdGVfaWQiOiJzaXRlXzEyMyIsInQiOjE3NjI2NDI2ODAsInYiOjF9.AtwwNuXpx5IbXpG7cLYEBNQ58vcy47EsxLtCq0PoqrGjxzGokq6ziIshiRYX_OF7w4nxLp7OV85MMyOCtonfBA"
-  },
   "challenge": {
-    "nonce_hex": "0707070707070707070707070707070707070707070707070707070707070707",
     "event": {
-      "v": 1,
+      "v": 2,
       "type": "site_entry",
+      "checkin_id": "chk_3q2-7wAAAAAAAAAAAAAAAA",
       "device_id": "dev_1",
-      "seq": 1834,
-      "nonce_kid": "n1",
-      "site_token": "IGS1.eyJraWQiOiJrMSIsInNpdGVfaWQiOiJzaXRlXzEyMyIsInQiOjE3NjI2NDI2ODAsInYiOjF9.AtwwNuXpx5IbXpG7cLYEBNQ58vcy47EsxLtCq0PoqrGjxzGokq6ziIshiRYX_OF7w4nxLp7OV85MMyOCtonfBA",
-      "occurred_at": "2026-11-09T07:58:12+09:00",
+      "site_id": "site_123",
+      "nonce": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "issued_at": "2026-11-08T22:58:12.000Z",
+      "location": {
+        "lat_e7": 356812360,
+        "lng_e7": 1397671200,
+        "accuracy_m": 12
+      },
       "attributes": {
         "gate": "東ゲート"
       }
     },
-    "event_canonical": "{\"attributes\":{\"gate\":\"東ゲート\"},\"device_id\":\"dev_1\",\"nonce_kid\":\"n1\",\"occurred_at\":\"2026-11-09T07:58:12+09:00\",\"seq\":1834,\"site_token\":\"IGS1.eyJraWQiOiJrMSIsInNpdGVfaWQiOiJzaXRlXzEyMyIsInQiOjE3NjI2NDI2ODAsInYiOjF9.AtwwNuXpx5IbXpG7cLYEBNQ58vcy47EsxLtCq0PoqrGjxzGokq6ziIshiRYX_OF7w4nxLp7OV85MMyOCtonfBA\",\"type\":\"site_entry\",\"v\":1}",
-    "challenge_b64url": "d3sztRYVhnHX545GozpYHA4GW41m4er6xswlv0fxlq8"
+    "event_canonical": "{\"attributes\":{\"gate\":\"東ゲート\"},\"checkin_id\":\"chk_3q2-7wAAAAAAAAAAAAAAAA\",\"device_id\":\"dev_1\",\"issued_at\":\"2026-11-08T22:58:12.000Z\",\"location\":{\"accuracy_m\":12,\"lat_e7\":356812360,\"lng_e7\":1397671200},\"nonce\":\"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc\",\"site_id\":\"site_123\",\"type\":\"site_entry\",\"v\":2}",
+    "challenge_b64url": "ww-O-YGDMeZudvPtNzPTOs-xRh292QF7qXpVFNGNp2o"
   },
   "billing": [
     {
-      "site_time": 1794234600,
+      "time": 1794234600,
       "time_zone": "Asia/Tokyo",
       "local_date": "2026-11-09"
     },
     {
-      "site_time": 1794238200,
+      "time": 1794238200,
       "time_zone": "Asia/Tokyo",
       "local_date": "2026-11-10"
     }

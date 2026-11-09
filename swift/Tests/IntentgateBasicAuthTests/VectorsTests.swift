@@ -19,37 +19,11 @@ final class VectorsTests: XCTestCase {
         }
     }
 
-    func testSiteTokenMatchesReference() throws {
-        let v = vectors["site_token"]!
-        let seed = Hex.decode(v["seed_hex"]!.stringValue!)!
-        let publicKey = Hex.decode(v["public_key_hex"]!.stringValue!)!
-        XCTAssertEqual(try Ed25519.publicKey(seed: seed), publicKey)
-
-        // The reference token verifies here.
-        let reference = v["token"]!.stringValue!
-        XCTAssertEqual(try SiteToken.verify(reference, publicKey: publicKey), SiteToken(siteId: "site_123", kid: "k1", t: 1_762_642_680))
-
-        // Our token has the same payload part and verifies. (CryptoKit's Ed25519 signatures are
-        // randomized on Apple platforms, so the signature part is not compared byte for byte.)
-        let p = v["payload"]!
-        let ours = try SiteToken(siteId: p["site_id"]!.stringValue!, kid: p["kid"]!.stringValue!, t: p["t"]!.intValue!)
-            .encode(signer: Ed25519.signer(seed: seed))
-        XCTAssertEqual(ours.split(separator: ".")[1], reference.split(separator: ".")[1])
-        XCTAssertNoThrow(try SiteToken.verify(ours, publicKey: publicKey))
-
-        var tampered = Array(reference)
-        tampered[tampered.count - 2] = tampered[tampered.count - 2] == "A" ? "B" : "A"
-        XCTAssertThrowsError(try SiteToken.verify(String(tampered), publicKey: publicKey))
-    }
-
     func testChallengeMatchesReference() throws {
         let v = vectors["challenge"]!
         let event = try CheckInEvent(json: v["event"]!)
         XCTAssertEqual(try event.canonicalJSON(), v["event_canonical"]!.stringValue!)
-        XCTAssertEqual(
-            try Challenge.computeBase64Url(nonce: Hex.decode(v["nonce_hex"]!.stringValue!)!, event: event),
-            v["challenge_b64url"]!.stringValue!
-        )
+        XCTAssertEqual(try Challenge.computeBase64Url(event: event), v["challenge_b64url"]!.stringValue!)
     }
 
     func testRejectsWhatTheReferenceRejects() {

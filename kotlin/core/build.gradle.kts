@@ -4,7 +4,7 @@ plugins {
     id("com.vanniktech.maven.publish")
 }
 
-// Bytecode for Java 17 so the same core runs on Android (API 33+ for Ed25519).
+// Bytecode for Java 17 so the same core runs on Android.
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
@@ -34,6 +34,6 @@ mavenPublishing {
     coordinates(artifactId = "basic-auth-core")
     pom {
         name.set("Intentgate basic-auth core")
-        description.set("Offline check-in client for Intentgate: nonce bundles, signed site tokens and WebAuthn challenges (JVM / Android).")
+        description.set("Check-in client for Intentgate: GPS position + passkey approval of server-issued events (JVM / Android).")
     }
 }

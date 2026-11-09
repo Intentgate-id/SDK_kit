@@ -10,15 +10,18 @@ import androidx.credentials.PublicKeyCredential
 import androidx.credentials.exceptions.CreateCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import id.intentgate.basicauth.CheckInClient
+import id.intentgate.basicauth.CheckInRequest
+import id.intentgate.basicauth.CheckInResult
+import id.intentgate.basicauth.IssuedCheckIn
 import id.intentgate.basicauth.Jcs
-import id.intentgate.basicauth.PreparedCheckIn
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class PasskeyCancelledException : Exception("the user cancelled the passkey prompt")
 
 /**
- * Signs check-in challenges with the worker's passkey through Android Credential Manager.
- * Signing happens on the device, so it works without network once the passkey exists.
- * Registration ([register]) needs network.
+ * Signs check-in challenges with the worker's passkey through Android Credential Manager
+ * (biometric / screen lock, user verification required).
  *
  * NOTE: not built in CI yet (no Android SDK there). Treat as a reference implementation.
  */
@@ -62,20 +65,21 @@ class PasskeySigner(private val activity: Activity, private val rpId: String) {
 }
 
 /**
- * Full offline check-in: prepare, biometric signature, queue.
- * A cancelled prompt returns the nonce so no sequence gap is left behind.
+ * Full check-in: ask the server (with the position), check the issued event, show the
+ * passkey prompt, complete. [confirm] runs between the server's answer and the prompt,
+ * e.g. to show the worker the site name and time; return false to stop.
+ *
+ *   val location = fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
+ *   val result = client.checkIn(signer, CheckInRequest("site_entry", siteId,
+ *       location.latitude, location.longitude, location.accuracy.toDouble()))
  */
 suspend fun CheckInClient.checkIn(
     signer: PasskeySigner,
-    type: String,
-    siteToken: String,
-    attributes: Map<String, Any?> = emptyMap(),
-) = prepare(type, siteToken, attributes).let { prepared: PreparedCheckIn ->
-    val assertion = try {
-        signer.sign(prepared.challenge)
-    } catch (e: Exception) {
-        cancel(prepared)
-        throw e
-    }
-    complete(prepared, assertion)
+    request: CheckInRequest,
+    confirm: suspend (IssuedCheckIn) -> Boolean = { true },
+): CheckInResult? {
+    val issued = withContext(Dispatchers.IO) { start(request) }
+    if (!confirm(issued)) return null
+    val assertion = signer.sign(issued.challenge, issued.allowCredentials)
+    return withContext(Dispatchers.IO) { complete(issued.checkinId, assertion) }
 }
