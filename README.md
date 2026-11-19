@@ -2,6 +2,7 @@
 
 工事現場の入退場などの打刻を、**作業員本人のスマホのパスキー（生体認証）で承認し、その位置と時刻をサーバーで確定して記録する**ための SDK です。現場に QR やタブレットは要りません。Intentgate の API（`https://checkin.intentgate.id`）と一緒に使います。
 
+- [導入の流れ（遷移図）](https://app.notion.com/p/41d764643d3e81cebe41d54d25e76778)：アカウント作成から管理画面へのログイン、SDK 組み込み、打刻までの流れ
 - [クイックスタート](docs/quickstart.md)：テスト用キーで、スマホなしに打刻を一周させる
 - [仕組み](docs/concepts.md)：何が証明でき、何が証明できないか
 - [Android](docs/integration-android.md) ／ [iOS](docs/integration-ios.md)
