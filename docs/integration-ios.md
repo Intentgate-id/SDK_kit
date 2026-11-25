@@ -21,7 +21,7 @@ https://github.com/Intentgate-id/SDK_kit
 `Package.swift` で使う場合:
 
 ```swift
-.package(url: "https://github.com/Intentgate-id/SDK_kit", from: "0.2.0"),
+.package(url: "https://github.com/Intentgate-id/SDK_kit", from: "0.3.0"),
 // ターゲットの dependencies に
 .product(name: "IntentgateBasicAuth", package: "SDK_kit"),
 .product(name: "IntentgateBasicAuthPasskeys", package: "SDK_kit"),

@@ -6,7 +6,7 @@
 
 - Intentgate から届いたもの
   - テスト用 API キー（`igk_test_...`）
-  - 本社管理者の招待リンク（管理画面 `https://checkin.intentgate.id/` のログイン用）
+  - 本社管理者の招待リンク。開いてパスワードを設定すると、管理画面 `https://checkin.intentgate.id/` にメールアドレスとパスワードでログインできます
 - 作業員アプリのドメイン（RP ID）。テスト用には `localhost` やステージングのドメインも使えます。Intentgate に伝えてください。
 
 ```sh
@@ -16,7 +16,19 @@ export IG_KEY=igk_test_...
 
 > API キーはサーバーでだけ使います。アプリに埋め込まないでください。
 
-## 1. キーを確かめる
+## 1. 接続とキーを確かめる
+
+まず API に届くかを確かめます。キーは要りません。
+
+```sh
+curl -s $IG_API/health
+```
+
+```json
+{"ok":true}
+```
+
+次にキーを確かめます。
 
 ```sh
 curl -s $IG_API/v1/account -H "Authorization: Bearer $IG_KEY"
@@ -97,7 +109,7 @@ curl -s -X POST $IG_API/v1/workers/wrk_.../devices -H "Authorization: Bearer $IG
 # → {"device": {"id": "dev_...", "worker_id": "wrk_..."}, "device_token": "igd_..."}
 ```
 
-`device_token` は一度しか返りません。自社のログイン済みのチャネルでアプリに渡し、アプリは端末の安全な保存領域（Android Keystore、iOS Keychain）に入れてください。機種変更のときは古い端末を `DELETE /v1/devices/{id}` で失効させ、新しく発行します。
+`device_token` は一度しか返りません。自社のログイン済みのチャネルでアプリに渡し、アプリは端末の安全な保存領域（Android Keystore、iOS Keychain）に入れてください（Web アプリの場合は [Web への組み込み](integration-web.md#3-パスキーを登録する) を参照）。機種変更のときは古い端末を `DELETE /v1/devices/{id}` で失効させ、新しく発行します。
 
 ### 現場に割り当てる
 
@@ -112,6 +124,7 @@ curl -s -X POST $IG_API/v1/sites/site_.../assignments -H "Authorization: Bearer 
 
 - [Android](integration-android.md)
 - [iOS](integration-ios.md)
+- [Web（ブラウザ）](integration-web.md)
 
 アプリが Intentgate と直接やり取りするのは打刻の 2 回だけで、どちらも端末トークンで認証します。SDK の `CheckInClient` が呼びます。
 
@@ -130,7 +143,7 @@ curl -s "$IG_API/v1/usage?from=2026-11-01&to=2026-11-30" -H "Authorization: Bear
 
 ## 6. 本番に切り替える
 
-1. 本番用の RP ID とオリジン（Android の署名証明書ハッシュを含む）を Intentgate に伝える。
+1. 本番用の RP ID とオリジン（Android の署名証明書ハッシュ、Web アプリならページのオリジンを含む）を Intentgate に伝える。
 2. 管理画面の「設定」で本番用 API キー（`igk_live_...`）を作り、サーバーの環境変数を差し替える。
 3. 本番の現場・作業員・端末を作り直す。テストのデータは本番に引き継がれません。
 

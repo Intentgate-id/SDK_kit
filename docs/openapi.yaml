@@ -31,6 +31,21 @@ tags:
     description: 課金単位（作業員 × 現場 × 日）
 
 paths:
+  /health:
+    get:
+      tags: [account]
+      summary: 接続の確認（キー不要）
+      security: []
+      responses:
+        "200":
+          description: API が動いている
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+                required: [ok]
   /v1/account:
     get:
       operationId: getAccount

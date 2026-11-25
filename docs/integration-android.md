@@ -17,7 +17,7 @@ Maven Central から取り込みます。
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("id.intentgate:basic-auth-android:0.2.0")   // basic-auth-core も一緒に入る
+    implementation("id.intentgate:basic-auth-android:0.3.0")   // basic-auth-core も一緒に入る
 }
 ```
 
@@ -142,7 +142,7 @@ CheckInRequest("site_exit", siteId, lat, lng, accuracy, attributes = mapOf("gate
 | code | HTTP | 意味と対処 |
 | --- | --- | --- |
 | `checkin_expired` | 410 | 申請から 180 秒以内に署名が届かなかった。最初からやり直す |
-| `unknown_site` | 404 | 現場が見つからない。テスト用アプリで本番の現場 ID を使ったときもこうなる |
+| `unknown_site` | 404 | 現場が見つからない。テスト用アプリで本番の現場 ID を使ったとき、また他社の現場で、作業員がその日に割り当てられていないときもこうなる |
 | `site_location_missing` | 409 | 現場の位置が登録されていない。管理画面で登録する |
 | `no_passkey` | 409 | 作業員にパスキーがない。登録からやり直す |
 | `invalid_signature` | 400 | 署名を検証できない。RP ID やオリジンの食い違いが多い |

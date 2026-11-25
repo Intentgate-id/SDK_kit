@@ -1,0 +1,28 @@
+{
+  "name": "@intentgate/basic-auth-web",
+  "version": "0.3.0",
+  "description": "Browser SDK for Intentgate check-in: ask the server, check the issued event, sign with the worker's passkey (WebAuthn), complete",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "sideEffects": false,
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/Intentgate-id/SDK_kit.git", "directory": "web/packages/web" },
+  "homepage": "https://github.com/Intentgate-id/SDK_kit/blob/main/docs/integration-web.md",
+  "keywords": ["intentgate", "passkey", "webauthn", "fido2", "check-in"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@intentgate/basic-auth-protocol": "0.3.0"
+  }
+}

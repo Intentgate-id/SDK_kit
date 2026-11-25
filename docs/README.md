@@ -8,6 +8,7 @@ Intentgate の打刻 SDK を使って、作業員アプリと自社のバック�
 | [仕組み](concepts.md) | 登場する 3 者（自社バックエンド、作業員アプリ、Intentgate）、打刻の流れ、何が証明できるか、要確認のフラグ |
 | [Android への組み込み](integration-android.md) | 位置の取得、Credential Manager でのパスキー登録と打刻、Digital Asset Links |
 | [iOS への組み込み](integration-ios.md) | Core Location での位置の取得、AuthenticationServices でのパスキー登録と打刻、Associated Domains |
+| [Web（ブラウザ）への組み込み](integration-web.md) | ブラウザの WebAuthn でのパスキー登録と打刻、位置の取得、オリジンの登録（CORS） |
 | [API リファレンス](openapi.yaml) | OpenAPI 3.1。`/v1` のすべてのエンドポイント、エラーコード |
 
 プロトコルの仕様は [spec/PROTOCOL.md](../spec/PROTOCOL.md)、言語間で共通のテストベクタは [spec/test-vectors.json](../spec/test-vectors.json) にあります。
@@ -37,3 +38,17 @@ API キーは 2 種類あります。Stripe と同じ考え方です。
 ```sh
 export IG_API=https://checkin.intentgate.id
 ```
+
+### 接続の確認
+
+キーなしで呼べる `/health` で、API に届くかを確かめられます。
+
+```sh
+curl -s $IG_API/health
+```
+
+```json
+{"ok":true}
+```
+
+返ってこないときは、社内のプロキシやファイアウォールで `$IG_API` のホストへの HTTPS が許可されているか確認してください。

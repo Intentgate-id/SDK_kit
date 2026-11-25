@@ -1,10 +1,12 @@
 # Runs when the internal repository pushes a version tag (v0.1.0, ...).
 # Swift Package Manager picks the tag up by itself; this publishes the Kotlin artifacts
-# to Maven Central and creates the GitHub release.
+# to Maven Central, the Web SDK to npm, and creates the GitHub release.
 #
 # Secrets (Settings › Secrets and variables › Actions):
 #   MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD  Central Portal user token
 #   SIGNING_KEY / SIGNING_KEY_PASSWORD               ASCII-armored GPG private key and its passphrase
+#   NPM_TOKEN                                        npm granular token with publish rights on @intentgate
+#                                                    (without it the npm job is skipped)
 name: Release
 
 on:
@@ -19,6 +21,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # npm provenance
 
 jobs:
   release:
@@ -54,3 +57,53 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$TAG" --title "$TAG" --generate-notes
+
+  # Web SDK to npm. Authenticates with the NPM_TOKEN secret, or, once the repository variable
+  # NPM_TRUSTED_PUBLISHING is "true", with GitHub OIDC (npm Trusted Publishing, no token).
+  # Without either the job only warns, so Maven Central and Swift still go out.
+  npm:
+    runs-on: ubuntu-latest
+    env:
+      HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+      TRUSTED: ${{ vars.NPM_TRUSTED_PUBLISHING == 'true' }}
+    steps:
+      - name: Resolve tag
+        env: { INPUT_TAG: "${{ inputs.tag }}" }
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "not a version tag: $TAG"; exit 1; }
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+          if [[ "$HAS_TOKEN" == "true" || "$TRUSTED" == "true" ]]; then
+            echo "PUBLISH=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Neither NPM_TOKEN nor NPM_TRUSTED_PUBLISHING is set: the Web SDK is not published to npm"
+          fi
+      - if: env.PUBLISH == 'true'
+        uses: actions/checkout@v4
+        with: { ref: "${{ env.TAG }}" }
+      - if: env.PUBLISH == 'true'
+        uses: actions/setup-node@v4
+        with: { node-version: 22, registry-url: "https://registry.npmjs.org" }
+      # Trusted Publishing needs npm 11.5.1 or later.
+      - if: env.PUBLISH == 'true'
+        run: npm install -g npm@^11.5.1
+      - name: Test and build
+        if: env.PUBLISH == 'true'
+        working-directory: web
+        run: npm install && npm run typecheck && npm test && npm run build
+      # The protocol first: the web package depends on it at the same version.
+      # A version that is already on npm is skipped, so the workflow can be re-run.
+      - name: Publish to npm
+        if: env.PUBLISH == 'true'
+        working-directory: web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in @intentgate/basic-auth-protocol @intentgate/basic-auth-web; do
+            if npm view "$pkg@$VERSION" version >/dev/null 2>&1; then
+              echo "$pkg@$VERSION is already on npm, skipping"
+            else
+              npm publish -w "$pkg" --access public --provenance
+            fi
+          done
